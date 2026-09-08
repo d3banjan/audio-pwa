@@ -328,8 +328,10 @@ test("processes a committed MP4 cache in the worker and returns a real PCM24 WAV
 
   await page.locator("#create-output").click();
   await expect(page.locator("#preview-play")).toHaveText(/Play|Resume/);
+  // A fast runner can advance from Starting directly to Ready between browser
+  // polls, so completion is also valid evidence that the staged job ran.
   await expect(page.locator("#output-status")).toContainText(
-    /Analyzing|Applying|Creating/,
+    /Analyzing|Applying|Creating|Ready locally as audio\/wav/,
     { timeout: 15_000 },
   );
   await expect(page.locator("#output-status")).toContainText(
