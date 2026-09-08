@@ -1,0 +1,28 @@
+{
+  "name": "cinematic-audio-workstation",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "bun run typecheck && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.{ts,css}\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" vite.config.ts playwright.config.ts package.json index.html public/manifest.webmanifest",
+    "format:check": "prettier --check \"src/**/*.{ts,css}\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" vite.config.ts playwright.config.ts package.json index.html public/manifest.webmanifest",
+    "test:browser": "bun run build && playwright test",
+    "wiki:check": "node scripts/verify-wiki.mjs",
+    "release:check": "bun run format:check && bun run test && bun run wiki:check && bun run test:browser && node scripts/verify-release.mjs",
+    "check": "bun run format:check && bun run typecheck && bun run test && bun run wiki:check"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.15.3",
+    "prettier": "^3.9.6",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.3"
+  }
+}

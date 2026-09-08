@@ -1,0 +1,19 @@
+{
+  "name": "Cinematic Audio Workstation",
+  "short_name": "Cinematic Audio",
+  "description": "Private, local-first cinematic audio restoration and mixing.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f8f8f3",
+  "theme_color": "#f8f8f3",
+  "icons": [
+    {
+      "src": "./icons/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
