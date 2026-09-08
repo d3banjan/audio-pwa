@@ -56,6 +56,7 @@ test("keeps fixture disclosure visible in demo mode", async ({ page }) => {
   await expect(page.locator("#fixture-summary")).toContainText(
     "Synthetic fixture loaded. This demo only changes UI planning state and does not process real audio.",
   );
+  await expect(page.locator("#simulated-planning")).toBeVisible();
   await expect(page.locator("#simulated-planning")).toHaveAttribute("open", "");
   await expect(page.locator("#enhance-progress")).toHaveAttribute(
     "aria-label",

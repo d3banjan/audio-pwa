@@ -22,7 +22,7 @@ This package now ships a fixture-only experience prototype for the complete UX f
 - optional semantic acoustic-region inclusion toggle,
 - assembled-preview state and explicit stem export inclusion controls (D-015),
 - explicit fixture-disclosure visibility that cannot be accidentally hidden as a normal production status.
-- real-file mode keeps the local preview, automatic audio preparation, and processed preview as the primary path; simulated planning is collapsed and labeled as demo-only.
+- real-file mode keeps the local preview, automatic audio preparation, and processed preview as the primary path; the simulated planning panel is hidden entirely and remains available only in explicit fixture mode.
 - recoverable-error retry and reset controls, with reducer transitions preserving the failed plan snapshot.
 - audio/video fixture labeling derived from the selected filename.
 - cancellation advances both state machines together so a subsequent run uses a new generation; finished-mix inclusion is an explicit accessible export choice.
@@ -74,8 +74,8 @@ Focused validation after these repairs: formatting, typecheck, 69 unit tests, pr
 - Run Enhance is a fixture simulation and explicitly states it does not run real inference.
 - Acoustic-region controls only influence preview labeling; no production scene-analysis engine is hooked.
 - Export action is a simulation endpoint for preview assembly and manifest selection only.
-- The real processed-file path is owned by I-006; this package's planning/export controls remain intentionally simulated and are only exposed as an explicitly labeled demo panel.
+- The real processed-file path is owned by I-006; this package's planning/export controls remain intentionally simulated and are only exposed in explicit fixture mode.
 
 ## Final browser gate
 
-The current integrated prototype passes 100 unit tests and 32 Chromium journeys. After Astra identified that the simulated planner was too prominent, real-file mode was changed to lead with the balanced processed preview and keep demo planning collapsed. A fresh Astra browser pass verified the repaired desktop and 390 px layouts, truthful empty-cache copy, distinct progress names, and no horizontal overflow.
+The current integrated prototype passes 100 unit tests and 32 Chromium journeys. After Astra identified that the simulated planner was too prominent, real-file mode was changed to lead with the balanced processed preview and hide the demo planner entirely. Fixture mode keeps the planner open for interface testing. A fresh Astra browser pass verified the repaired desktop and 390 px layouts, truthful empty-cache copy, distinct progress names, and no horizontal overflow.

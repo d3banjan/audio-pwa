@@ -403,7 +403,7 @@ app.innerHTML = `<main class="workstation">
     <div class="import-panel">
       <p class="eyebrow">01 · SOURCE</p>
       <h2 id="source-title">Upload a local file</h2>
-      <label class="file-picker"><span>Choose file</span><small>WAV, MP3, M4A, AAC, FLAC, or MP4 for local preview and planning</small><input id="media-file" accept="audio/wav,audio/mpeg,audio/mp4,audio/aac,audio/flac,video/mp4,.flac,.wav,.mp3,.m4a,.aac,.mp4" type="file"></label>
+      <label class="file-picker"><span>Choose file</span><small>WAV, MP3, M4A, AAC, FLAC, or MP4 for local preview${fixtureMode ? " and planning" : ""}</small><input id="media-file" accept="audio/wav,audio/mpeg,audio/mp4,audio/aac,audio/flac,video/mp4,.flac,.wav,.mp3,.m4a,.aac,.mp4" type="file"></label>
       <p id="selection-status" class="selection" role="status" aria-live="polite" aria-atomic="true"></p>
       <p id="audio-cache-status" class="selection" role="status" aria-live="polite" aria-atomic="true"></p>
       <progress id="audio-cache-progress" max="100" value="0" hidden aria-label="Local audio preparation progress"></progress>
@@ -519,7 +519,7 @@ app.innerHTML = `<main class="workstation">
           </section>
         </details>
 
-          <details id="simulated-planning" class="advanced-disclosure"${fixtureMode ? " open" : ""}>
+          <details id="simulated-planning" class="advanced-disclosure"${fixtureMode ? " open" : " hidden"}>
           <summary>Demo planning (simulated) <small>for testing the interface</small></summary>
           <section class="control-card" aria-labelledby="progress-heading">
           <h3 id="progress-heading">Enhance</h3>

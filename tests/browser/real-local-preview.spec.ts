@@ -37,7 +37,7 @@ async function resetAndOpen(page: Page): Promise<void> {
   await page.goto("./");
 }
 
-test("real mode leads with local preview and keeps simulated planning collapsed", async ({
+test("real mode leads with local preview and hides simulated planning", async ({
   page,
 }) => {
   await resetAndOpen(page);
@@ -47,12 +47,9 @@ test("real mode leads with local preview and keeps simulated planning collapsed"
   await expect(page.locator("#audio-cache-status")).toHaveText(
     "Choose a video to prepare its audio locally.",
   );
-  await expect(page.locator("#simulated-planning")).not.toHaveAttribute(
-    "open",
-    "",
-  );
-  await expect(page.locator("#simulated-planning summary")).toContainText(
-    "Demo planning (simulated)",
+  await expect(page.locator("#simulated-planning")).toBeHidden();
+  await expect(page.locator("#media-file").locator("..")).not.toContainText(
+    "planning",
   );
   await expect(page.locator("#recommendation-heading")).toHaveText(
     "Start with the balanced processed preview",
@@ -63,10 +60,6 @@ test("real mode leads with local preview and keeps simulated planning collapsed"
   await expect(page.locator("#output-progress")).toHaveAttribute(
     "aria-label",
     "Processed file creation progress",
-  );
-  await expect(page.locator("#enhance-progress")).toHaveAttribute(
-    "aria-label",
-    "Simulated enhancement plan progress",
   );
 });
 
