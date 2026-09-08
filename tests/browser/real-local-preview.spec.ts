@@ -161,14 +161,15 @@ test("real local preview stays private and supports basic transport", async ({
   );
   await expect(page.locator("#preview-status")).toContainText("ready");
   await expect(page.locator("#preview-play")).toBeEnabled();
-  await expect(page.locator("#preview-pause")).toBeEnabled();
   await expect(page.locator("#preview-seek")).toBeEnabled();
 
   await page.locator("#preview-play").click();
+  await expect(page.locator("#preview-play")).toHaveText("Pause");
   await expect(page.locator("#preview-status")).toContainText(
     "playback active",
   );
-  await page.locator("#preview-pause").click();
+  await page.locator("#preview-play").click();
+  await expect(page.locator("#preview-play")).toHaveText("Resume");
   await expect(page.locator("#preview-status")).toContainText("paused");
 
   const seek = page.locator("#preview-seek");

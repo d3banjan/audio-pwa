@@ -420,7 +420,6 @@ app.innerHTML = `<main class="workstation">
         <video id="local-media-preview" aria-label="Local media preview" preload="metadata" playsinline muted></video>
         <div class="row-actions">
           <button type="button" id="preview-play" disabled>Play</button>
-          <button type="button" id="preview-pause" disabled>Pause</button>
         </div>
         <label class="control-help" for="preview-seek">Playback position</label>
         <input id="preview-seek" min="0" max="0" step="0.1" type="range" value="0" disabled />
@@ -623,7 +622,6 @@ const localMediaElement = requiredElement<HTMLVideoElement>(
   "#local-media-preview",
 );
 const previewPlayButton = requiredElement<HTMLButtonElement>("#preview-play");
-const previewPauseButton = requiredElement<HTMLButtonElement>("#preview-pause");
 const previewSeek = requiredElement<HTMLInputElement>("#preview-seek");
 const previewStatus = requiredElement<HTMLParagraphElement>("#preview-status");
 const outputProgress = requiredElement<HTMLProgressElement>("#output-progress");
@@ -700,7 +698,6 @@ const updateLocalPreviewUi = (): void => {
   previewSeek.disabled =
     !previewState.sourceName || !hasDuration || isLocalBusy();
   previewPlayButton.disabled = !previewState.sourceName || isLocalBusy();
-  previewPauseButton.disabled = !previewState.sourceName || isLocalBusy();
   createOutput.disabled =
     fixtureMode || !canCreateOutput || Boolean(processedOutputJob);
   cancelOutput.disabled = !processedOutputJob;
@@ -713,7 +710,11 @@ const updateLocalPreviewUi = (): void => {
     );
   }
   previewPlayButton.textContent =
-    previewState.status === "playing" ? "Resume" : "Play";
+    previewState.status === "playing"
+      ? "Pause"
+      : previewState.status === "paused"
+        ? "Resume"
+        : "Play";
 };
 
 localPreviewController.onStateChange(() => {
@@ -1096,7 +1097,6 @@ function syncControls(): void {
     controlDucking,
     controlLoudness,
     previewPlayButton,
-    previewPauseButton,
     previewSeek,
     compareSource,
     comparePreview,
@@ -1434,6 +1434,10 @@ function wireInputs(): void {
   });
 
   previewPlayButton.addEventListener("click", async () => {
+    if (localPreviewController.getState().status === "playing") {
+      localPreviewController.pause();
+      return;
+    }
     localPreviewController.setMode(experienceState.comparisonMode);
     await localPreviewController.play();
   });
@@ -1505,9 +1509,6 @@ function wireInputs(): void {
   });
   cancelOutput.addEventListener("click", () => {
     void processedOutputJob?.cancel();
-  });
-  previewPauseButton.addEventListener("click", () => {
-    localPreviewController.pause();
   });
   previewSeek.addEventListener("input", () => {
     const value = Number(previewSeek.value);
