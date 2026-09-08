@@ -111,7 +111,7 @@ bun run typecheck
 ```
 
 The I-013 processing suites pass 34 focused tests, including eight pure storage
-admission cases. The aggregate repository gate passes 190
+admission cases. The aggregate repository gate passes 191
 unit tests, formatting, type checking, and wiki validation. Fifteen real
 Chromium journeys pass, including committed MP4 cache processing into a valid
 stereo PCM24 RIFF/WAVE file, prepared-job cancellation, and replacing a cached
@@ -133,3 +133,11 @@ overflow, or confirmed UI defect. The in-app browser's supported file chooser
 hung, so Astra did not claim independent post-upload interaction coverage; the
 real Chromium journeys above remain the evidence for upload, transport,
 processing, cancellation, and output behavior.
+
+After deployment of commit `bae24bf`, an unmodified fresh Chromium session
+loaded the published GitHub Pages site, prepared the generated MP4 fixture,
+selected `silero-wasm`, and produced a playable 48 kHz stereo PCM24 WAV. The
+page raised no errors and requested no resources outside its own origin. This
+live check caught and verified the fix for compressed model responses: HTTP
+`Content-Length` described the compressed transfer, while decoded byte length
+and SHA-256 matched the pinned artifact.
