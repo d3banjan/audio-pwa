@@ -24,6 +24,11 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
+      - name: Use the runner Chrome codec build
+        run: |
+          chrome_path="$(command -v google-chrome || command -v google-chrome-stable)"
+          test -n "$chrome_path"
+          echo "PLAYWRIGHT_EXECUTABLE_PATH=$chrome_path" >> "$GITHUB_ENV"
       - run: bun run release:check
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
