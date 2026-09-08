@@ -1,3 +1,5 @@
+import type { EnrichmentOptions } from "../processing/chunk-enrichment";
+
 export type PreviewMode = "source" | "preview";
 
 type LoudnessPreset = "preserve-dynamics" | "clear-balanced" | "streaming-loud";
@@ -93,6 +95,7 @@ export interface ProcessingParameters {
   highpassQ: number;
   presenceFrequency: number;
   presenceGain: number;
+  presenceQ: number;
   compressorThreshold: number;
   compressorRatio: number;
   sideGain: number;
@@ -139,6 +142,7 @@ export function deriveProcessingParameters(
     highpassQ: clamp(0.6 + dialogue / 220, 0.6, 1.2),
     presenceFrequency: clamp(2800, 2600, 3200),
     presenceGain: clamp(1 + dialogue / 90, 0.5, 2.4),
+    presenceQ: 0.8,
     compressorThreshold: -24,
     compressorRatio: 4,
     sideGain: clamp(0.5 + width, 0.5, 1.5),
@@ -149,6 +153,27 @@ export function deriveProcessingParameters(
           ? 1.16
           : 1.0,
   };
+}
+
+export function deriveBatchEnrichmentOptions(
+  controls: PreviewControls,
+): Omit<
+  EnrichmentOptions,
+  "generation" | "signal" | "isGenerationCurrent" | "onProgress"
+> {
+  const parameters = deriveProcessingParameters(controls);
+  return Object.freeze({
+    rumbleCut: true,
+    highpassFrequency: parameters.highpassFrequency,
+    highpassQ: parameters.highpassQ,
+    presenceFrequency: parameters.presenceFrequency,
+    presenceDb: parameters.presenceGain,
+    presenceQ: parameters.presenceQ,
+    compressorThresholdDb: parameters.compressorThreshold,
+    compressorRatio: parameters.compressorRatio,
+    width: parameters.sideGain,
+    dialogueGain: parameters.outputGain,
+  });
 }
 
 export function createDefaultState(): LocalPreviewState {
@@ -461,6 +486,10 @@ export function createRealMediaPreviewController(
     );
     graph.presence.gain.setValueAtTime(
       params.presenceGain,
+      graph.context.currentTime,
+    );
+    graph.presence.Q.setValueAtTime(
+      params.presenceQ,
       graph.context.currentTime,
     );
     graph.compressor.threshold.setValueAtTime(

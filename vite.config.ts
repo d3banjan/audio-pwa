@@ -6,6 +6,12 @@ import { defineConfig, type Plugin } from "vitest/config";
 const STATIC_SHELL_FILES = [
   "manifest.webmanifest",
   "icons/app-icon.svg",
+  "models/silero-vad-v6.2.1/silero_vad_16k_op15.onnx",
+  "models/silero-vad-v6.2.1/LICENSE.upstream.txt",
+  "models/silero-vad-v6.2.1/README.txt",
+  "runtime/onnxruntime-web-1.29.0/LICENSE.upstream.txt",
+  "runtime/onnxruntime-web-1.29.0/ThirdPartyNotices.upstream.txt",
+  "runtime/onnxruntime-web-1.29.0/README.txt",
 ] as const;
 
 function serviceWorkerSource(
@@ -122,7 +128,9 @@ function immutableShellPlugin(): Plugin {
           (fileName) =>
             fileName === "index.html" ||
             (fileName.startsWith("assets/") &&
-              (fileName.endsWith(".js") || fileName.endsWith(".css"))),
+              (fileName.endsWith(".js") ||
+                fileName.endsWith(".css") ||
+                fileName.endsWith(".wasm"))),
         );
       const shellFiles = [
         "./",
@@ -164,6 +172,9 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: true,
+  },
+  worker: {
+    format: "es",
   },
   test: {
     environment: "node",

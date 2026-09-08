@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   createDefaultState,
   createRealMediaPreviewController,
+  deriveBatchEnrichmentOptions,
   deriveProcessingParameters,
   isLikelySupportedAudioVideoFile,
 } from "./real-local-preview";
@@ -167,6 +168,30 @@ describe("real media preview helpers", () => {
       loudnessPreset: "clear-balanced",
     });
     expect(params.sideGain).toBeCloseTo(1.0, 5);
+  });
+
+  test("batch enrichment receives the accepted preview parameters", () => {
+    const controls = {
+      dialogueClean: 50,
+      musicWeight: 50,
+      width: 80,
+      ducking: 30,
+      loudnessPreset: "clear-balanced" as const,
+    };
+    const preview = deriveProcessingParameters(controls);
+    expect(deriveBatchEnrichmentOptions(controls)).toEqual({
+      rumbleCut: true,
+      highpassFrequency: preview.highpassFrequency,
+      highpassQ: preview.highpassQ,
+      presenceFrequency: preview.presenceFrequency,
+      presenceDb: preview.presenceGain,
+      presenceQ: preview.presenceQ,
+      compressorThresholdDb: preview.compressorThreshold,
+      compressorRatio: preview.compressorRatio,
+      width: preview.sideGain,
+      dialogueGain: preview.outputGain,
+    });
+    expect(preview.presenceQ).toBe(0.8);
   });
 
   test("supports expected audio/video extensions", () => {

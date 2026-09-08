@@ -13,6 +13,8 @@
     "format": "prettier --write \"src/**/*.{ts,css}\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" vite.config.ts playwright.config.ts package.json index.html public/manifest.webmanifest",
     "format:check": "prettier --check \"src/**/*.{ts,css}\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" vite.config.ts playwright.config.ts package.json index.html public/manifest.webmanifest",
     "test:browser": "bun run build && playwright test",
+    "probe:silero": "node scripts/probe-silero-browser.mjs",
+    "probe:wav": "node scripts/probe-wav-browser.mjs",
     "wiki:check": "node scripts/verify-wiki.mjs",
     "release:check": "bun run format:check && bun run test && bun run wiki:check && bun run test:browser && node scripts/verify-release.mjs",
     "check": "bun run format:check && bun run typecheck && bun run test && bun run wiki:check"
@@ -24,5 +26,8 @@
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "vitest": "^3.1.3"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.29.0"
   }
 }

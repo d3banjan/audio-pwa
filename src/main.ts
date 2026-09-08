@@ -48,6 +48,7 @@ import type {
 } from "./lib/experience-state";
 import {
   createRealMediaPreviewController,
+  deriveBatchEnrichmentOptions,
   type LocalMediaPreviewController,
   type PreviewControls,
 } from "./media/real-local-preview";
@@ -56,6 +57,8 @@ import {
   type ProcessedOutputJob,
 } from "./media/processed-output";
 import { createLocalAudioExtractionController } from "./media/local-audio-extraction";
+import { ProcessingWorkerController } from "./processing/processing-worker-controller";
+import { admitProcessingStorage } from "./processing/processing-storage-admission";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Application root is missing.");
@@ -98,6 +101,11 @@ let advancedDisclosureInitialized = false;
 let exportDisclosureInitialized = false;
 let fixtureDisclosureInitialized = false;
 let processedOutputJob: ProcessedOutputJob | undefined;
+let outputLaunchToken: symbol | undefined;
+let processedOutputMode: "live-recorder" | "prepared-worker" | undefined;
+let localProcessingGeneration = 0;
+let extractionOwnerProjectId: ProjectId | undefined;
+let preparedCacheProjectId: ProjectId | undefined;
 let processedOutputUrl: string | undefined;
 let disposeProcessedOutput: (() => Promise<void>) | undefined;
 
@@ -427,7 +435,7 @@ app.innerHTML = `<main class="workstation">
       </figure>
       <section class="output-card" aria-labelledby="output-title">
         <h3 id="output-title">Save a processed preview</h3>
-        <p class="control-help">Creates an audio-only file from the processed sound. This temporary exporter runs at playback speed and uses the preview player until it finishes or you cancel. Everything stays on this device.</p>
+        <p id="output-help" class="control-help">Creates an audio-only file from the processed sound. This temporary exporter runs at playback speed and uses the preview player until it finishes or you cancel. Everything stays on this device.</p>
         <progress id="output-progress" value="0" max="100" hidden aria-label="Processed file creation progress" aria-describedby="output-status"></progress>
         <p id="output-status" class="region-guard" role="status" aria-live="polite"></p>
         <div class="row-actions"><button type="button" id="create-output" class="primary">Create processed file</button><button type="button" id="cancel-output" class="secondary">Cancel</button></div>
@@ -626,6 +634,7 @@ const previewSeek = requiredElement<HTMLInputElement>("#preview-seek");
 const previewStatus = requiredElement<HTMLParagraphElement>("#preview-status");
 const outputProgress = requiredElement<HTMLProgressElement>("#output-progress");
 const outputStatus = requiredElement<HTMLParagraphElement>("#output-status");
+const outputHelp = requiredElement<HTMLParagraphElement>("#output-help");
 const createOutput = requiredElement<HTMLButtonElement>("#create-output");
 const cancelOutput = requiredElement<HTMLButtonElement>("#cancel-output");
 const outputPreview = requiredElement<HTMLAudioElement>("#output-preview");
@@ -661,7 +670,13 @@ const audioExtractionController = createLocalAudioExtractionController(
     updateUi();
   },
 );
-audioExtractionController.onStateChange(() => queueMicrotask(updateUi));
+audioExtractionController.onStateChange((state) => {
+  if (state.status === "complete")
+    preparedCacheProjectId = extractionOwnerProjectId;
+  else if (state.status === "cancelled" || state.status === "error")
+    preparedCacheProjectId = undefined;
+  queueMicrotask(updateUi);
+});
 startAudioCache.addEventListener(
   "click",
   () => void audioExtractionController.start(),
@@ -683,7 +698,8 @@ const syncPreviewControls = (): PreviewControls => ({
 
 const isLocalBusy = (): boolean =>
   ["enhancing", "exporting"].includes(experienceState.phase) ||
-  Boolean(processedOutputJob);
+  Boolean(processedOutputJob) ||
+  Boolean(outputLaunchToken);
 
 const updateLocalPreviewUi = (): void => {
   const previewState = localPreviewController.getState();
@@ -698,9 +714,13 @@ const updateLocalPreviewUi = (): void => {
   previewSeek.disabled =
     !previewState.sourceName || !hasDuration || isLocalBusy();
   previewPlayButton.disabled = !previewState.sourceName || isLocalBusy();
-  createOutput.disabled =
-    fixtureMode || !canCreateOutput || Boolean(processedOutputJob);
-  cancelOutput.disabled = !processedOutputJob;
+  createOutput.disabled = fixtureMode || !canCreateOutput || isLocalBusy();
+  cancelOutput.disabled = !processedOutputJob && !outputLaunchToken;
+  outputHelp.textContent =
+    audioExtractionController.getState().status === "complete" &&
+    preparedCacheProjectId === experienceState.projectId
+      ? "Processes the prepared audio in local chunks, then creates a 24-bit WAV with sample-peak safety. The preview stays paused while it works. Everything stays on this device."
+      : "Creates an audio-only file from the processed sound. This temporary exporter runs at playback speed and uses the preview player until it finishes or you cancel. Everything stays on this device.";
   previewSeek.max = hasDuration
     ? String(Math.max(0, previewState.durationSeconds!))
     : "0";
@@ -922,7 +942,8 @@ function renderProfiles(): void {
   const selectedProfileId = experienceState.selectedProfileId;
   const busy =
     ["enhancing", "exporting"].includes(experienceState.phase) ||
-    Boolean(processedOutputJob);
+    Boolean(processedOutputJob) ||
+    Boolean(outputLaunchToken);
   const existing = new Map(
     Array.from(
       profilesContainer.querySelectorAll<HTMLElement>("[data-profile-id]"),
@@ -1061,13 +1082,16 @@ function renderStemControls(): void {
 function syncControls(): void {
   const busy =
     ["enhancing", "exporting"].includes(experienceState.phase) ||
-    Boolean(processedOutputJob);
+    Boolean(processedOutputJob) ||
+    Boolean(outputLaunchToken);
   // LEAKY ABSTRACTION: I-006 records the live processed preview bus at playback speed.
   // Keep that bus active for the full recording; a routine UI refresh must not switch it
   // back to source/bypass. Replace with a stateful offline renderer that preserves the
   // same committed control snapshot. [[Implementation Package I-006 - Real Bounded Output]]
   localPreviewController.setMode(
-    processedOutputJob ? "preview" : experienceState.comparisonMode,
+    processedOutputJob || outputLaunchToken
+      ? "preview"
+      : experienceState.comparisonMode,
   );
   localPreviewController.setControls(syncPreviewControls());
   controlDialogue.value = String(experienceState.controlWorking.dialogueClean);
@@ -1212,7 +1236,10 @@ function updateUi(): void {
   cancelAudioCache.disabled = !extractionActive;
   projectPhase.textContent = projectState.phase.replaceAll("-", " ");
   projectStatus.textContent = projectState.message;
-  experienceStatus.textContent = experienceState.message;
+  experienceStatus.textContent =
+    !fixtureMode && experienceState.message.toLowerCase().includes("simulation")
+      ? "Source is ready for local preview. Prepared MP4 audio can be processed locally into WAV."
+      : experienceState.message;
   diagnosticsButton.disabled = capabilityProbeRunning;
   diagnosticsButton.textContent = capabilityProbeRunning
     ? "Checking…"
@@ -1344,8 +1371,13 @@ function wireInputs(): void {
       updateUi();
       return;
     }
-    void processedOutputJob?.cancel();
+    const previousOutputJob = processedOutputJob;
     processedOutputJob = undefined;
+    outputLaunchToken = undefined;
+    processedOutputMode = undefined;
+    localProcessingGeneration = nextGeneration(localProcessingGeneration);
+    extractionOwnerProjectId = undefined;
+    preparedCacheProjectId = undefined;
     if (mediaLoadInFlight) {
       importMessage =
         "Media analysis already in progress. Wait for completion before selecting another file.";
@@ -1358,6 +1390,21 @@ function wireInputs(): void {
     updateUi();
     void (async () => {
       try {
+        await previousOutputJob?.cancel();
+        if (processedOutputUrl) {
+          URL.revokeObjectURL(processedOutputUrl);
+          processedOutputUrl = undefined;
+        }
+        outputPreview.removeAttribute("src");
+        outputPreview.load();
+        await disposeProcessedOutput?.();
+        disposeProcessedOutput = undefined;
+        outputPreview.hidden = true;
+        outputDownload.removeAttribute("href");
+        outputDownload.hidden = true;
+        outputStatus.textContent = "";
+        outputProgress.hidden = true;
+        if (!fixtureMode) await audioExtractionController.cancel();
         if (!fixtureMode) {
           await localPreviewController.loadSource(file);
           const previewState = localPreviewController.getState();
@@ -1369,18 +1416,6 @@ function wireInputs(): void {
             return;
           }
         }
-        if (processedOutputUrl) {
-          URL.revokeObjectURL(processedOutputUrl);
-          processedOutputUrl = undefined;
-        }
-        void disposeProcessedOutput?.();
-        disposeProcessedOutput = undefined;
-        outputPreview.removeAttribute("src");
-        outputPreview.hidden = true;
-        outputDownload.removeAttribute("href");
-        outputDownload.hidden = true;
-        outputStatus.textContent = "";
-        outputProgress.hidden = true;
         const projectId = createOpaqueId("project") as ProjectId;
         const next = nextGeneration(projectState.generation);
         const prepared = fixtureMode
@@ -1412,6 +1447,7 @@ function wireInputs(): void {
           !fixtureMode &&
           (file.type === "video/mp4" || /\.mp4$/i.test(file.name))
         ) {
+          extractionOwnerProjectId = projectId;
           void audioExtractionController.extract(file);
         }
       } catch (cause) {
@@ -1442,44 +1478,193 @@ function wireInputs(): void {
     await localPreviewController.play();
   });
   createOutput.addEventListener("click", async () => {
+    if (outputLaunchToken || processedOutputJob) return;
     const previewState = localPreviewController.getState();
     const stream = localPreviewController.getProcessedStream();
     if (!previewState.sourceName || !stream || !previewState.durationSeconds)
       return;
-    await localPreviewController.resume();
-    processedOutputJob?.cancel();
+    const launchToken = Symbol("processed-output-launch");
+    outputLaunchToken = launchToken;
+    const sourceProjectId = experienceState.projectId;
+    const sourceName = previewState.sourceName;
+    const sourceDurationSeconds = previewState.durationSeconds;
+    const sourceExtraction = audioExtractionController.getState();
+    const sourceExtractionOwner = extractionOwnerProjectId;
+    const sourceCacheOwner = preparedCacheProjectId;
+    const preparedAudioReady =
+      sourceExtraction.status === "complete" &&
+      sourceCacheOwner === sourceProjectId &&
+      sourceExtractionOwner === sourceProjectId;
+    const launchIsCurrent = () => {
+      const currentPreview = localPreviewController.getState();
+      if (
+        outputLaunchToken !== launchToken ||
+        experienceState.projectId !== sourceProjectId ||
+        currentPreview.sourceName !== sourceName ||
+        currentPreview.durationSeconds !== sourceDurationSeconds
+      )
+        return false;
+      if (!preparedAudioReady) return true;
+      const currentExtraction = audioExtractionController.getState();
+      return (
+        preparedCacheProjectId === sourceCacheOwner &&
+        extractionOwnerProjectId === sourceExtractionOwner &&
+        currentExtraction.status === "complete" &&
+        currentExtraction.generation === sourceExtraction.generation &&
+        currentExtraction.validFrames === sourceExtraction.validFrames
+      );
+    };
+    updateUi();
     if (processedOutputUrl) {
       URL.revokeObjectURL(processedOutputUrl);
       processedOutputUrl = undefined;
     }
-    void disposeProcessedOutput?.();
+    outputPreview.removeAttribute("src");
+    outputPreview.load();
+    const previousOutputDisposer = disposeProcessedOutput;
     disposeProcessedOutput = undefined;
+    try {
+      await previousOutputDisposer?.();
+    } catch (error) {
+      if (outputLaunchToken === launchToken) {
+        outputLaunchToken = undefined;
+        outputStatus.textContent =
+          error instanceof Error
+            ? error.message
+            : "Could not clear the previous processed file.";
+        updateUi();
+      }
+      return;
+    }
+    if (!launchIsCurrent()) return;
     outputProgress.hidden = false;
     outputProgress.value = 0;
     outputStatus.textContent = "Starting local processed output…";
     outputPreview.hidden = true;
     outputDownload.hidden = true;
     localPreviewController.setMode("preview");
-    processedOutputJob = startProcessedOutput({
-      durationSeconds: previewState.durationSeconds,
-      sourceName: previewState.sourceName,
-      mediaElement: localMediaElement,
-      processedStream: stream,
-      onProgress(progress) {
-        outputProgress.value = progress.percent;
-        outputStatus.textContent = progress.message;
-        if (progress.phase === "cancelled") processedOutputJob = undefined;
-        updateUi();
-      },
-    });
-    const job = processedOutputJob;
-    void job.result
-      .then((result) => {
-        if (processedOutputJob !== job) {
-          void result.dispose();
+    try {
+      if (preparedAudioReady) {
+        let storageEstimate: StorageEstimate | undefined;
+        try {
+          storageEstimate = await navigator.storage?.estimate();
+        } catch {
+          storageEstimate = undefined;
+        }
+        if (!launchIsCurrent()) return;
+        const storageAdmission = admitProcessingStorage(
+          sourceExtraction.validFrames,
+          storageEstimate,
+        );
+        if (storageAdmission.status !== "admitted") {
+          outputLaunchToken = undefined;
+          outputProgress.hidden = true;
+          outputStatus.textContent =
+            storageAdmission.status === "insufficient"
+              ? "There is not enough free local storage for this processed file. Free some space and try again."
+              : "Local storage could not be checked. Processing has not started.";
+          updateUi();
           return;
         }
+        if (!launchIsCurrent()) return;
+        localPreviewController.pause();
+        const controller = new ProcessingWorkerController();
+        localProcessingGeneration = nextGeneration(localProcessingGeneration);
+        const generation = localProcessingGeneration;
+        const enrichment = Object.freeze(
+          deriveBatchEnrichmentOptions(Object.freeze(syncPreviewControls())),
+        );
+        processedOutputMode = "prepared-worker";
+        const result = controller
+          .start({
+            jobId: createOpaqueId("job"),
+            projectId: sourceProjectId ?? createOpaqueId("project"),
+            generation,
+            sourceName,
+            enrichment,
+            onProgress(event) {
+              if (generation !== localProcessingGeneration) return;
+              outputProgress.value = event.overallRatio * 100;
+              outputStatus.textContent =
+                event.stage === "segmentation"
+                  ? "Analyzing speech and sound changes locally…"
+                  : event.stage === "enrichment"
+                    ? "Applying the chosen sound settings in local chunks…"
+                    : "Creating the 24-bit WAV locally…";
+              updateUi();
+            },
+          })
+          .then(({ output, processing }) => ({
+            blob: output.blob,
+            mimeType: output.mimeType,
+            fileName: output.fileName,
+            usedOpfs: true,
+            classifierMode: processing.classifier.mode,
+            dispose: async () => {
+              try {
+                await controller.disposeOutput();
+              } finally {
+                controller.destroy();
+              }
+            },
+          }))
+          .catch((error) => {
+            controller.destroy();
+            throw error;
+          });
+        processedOutputJob = {
+          cancel: async () => controller.cancel(),
+          result,
+        };
+      } else {
+        await localPreviewController.resume();
+        if (!launchIsCurrent()) return;
+        processedOutputMode = "live-recorder";
+        processedOutputJob = startProcessedOutput({
+          durationSeconds: sourceDurationSeconds,
+          sourceName,
+          mediaElement: localMediaElement,
+          processedStream: stream,
+          onProgress(progress) {
+            outputProgress.value = progress.percent;
+            outputStatus.textContent = progress.message;
+            if (progress.phase === "cancelled") processedOutputJob = undefined;
+            updateUi();
+          },
+        });
+      }
+    } catch (error) {
+      if (outputLaunchToken === launchToken) outputLaunchToken = undefined;
+      processedOutputMode = undefined;
+      outputProgress.hidden = true;
+      outputStatus.textContent =
+        error instanceof Error
+          ? error.message
+          : "Could not start local processing.";
+      updateUi();
+      return;
+    }
+    const job = processedOutputJob;
+    if (!job) {
+      if (outputLaunchToken === launchToken) outputLaunchToken = undefined;
+      updateUi();
+      return;
+    }
+    void job.result
+      .then((result) => {
+        if (processedOutputJob !== job || outputLaunchToken !== launchToken) {
+          if (processedOutputJob === job) {
+            processedOutputJob = undefined;
+            processedOutputMode = undefined;
+          }
+          void result.dispose();
+          updateUi();
+          return;
+        }
+        const completedMode = processedOutputMode;
         processedOutputJob = undefined;
+        outputLaunchToken = undefined;
+        processedOutputMode = undefined;
         if (processedOutputUrl) URL.revokeObjectURL(processedOutputUrl);
         void disposeProcessedOutput?.();
         processedOutputUrl = URL.createObjectURL(result.blob);
@@ -1491,14 +1676,21 @@ function wireInputs(): void {
         outputDownload.textContent = `Download ${result.fileName}`;
         outputDownload.hidden = false;
         outputProgress.value = 100;
-        outputStatus.textContent = `Ready locally as ${result.mimeType}${result.usedOpfs ? " (saved in temporary local storage)" : " (kept within the browser memory limit)"}.`;
+        outputStatus.textContent =
+          completedMode === "prepared-worker"
+            ? `Ready locally as ${result.mimeType}. Processing used ${"classifierMode" in result && result.classifierMode === "silero-wasm" ? "the local speech model" : "the local DSP fallback"} and sample-peak safety.`
+            : `Ready locally as ${result.mimeType}${result.usedOpfs ? " (saved in temporary local storage)" : " (kept within the browser memory limit)"}.`;
         updateUi();
       })
       .catch((error) => {
         if (processedOutputJob !== job) return;
         processedOutputJob = undefined;
+        if (outputLaunchToken === launchToken) outputLaunchToken = undefined;
+        processedOutputMode = undefined;
         outputStatus.textContent =
-          error instanceof Error && error.message === "cancelled"
+          error instanceof Error &&
+          (error.message === "cancelled" ||
+            ("code" in error && error.code === "CANCELLED"))
             ? "Processing cancelled."
             : error instanceof Error
               ? error.message
@@ -1508,7 +1700,14 @@ function wireInputs(): void {
     updateUi();
   });
   cancelOutput.addEventListener("click", () => {
+    const pendingLaunch = outputLaunchToken;
+    outputLaunchToken = undefined;
     void processedOutputJob?.cancel();
+    if (pendingLaunch && !processedOutputJob) {
+      outputProgress.hidden = true;
+      outputStatus.textContent = "Processing cancelled.";
+    }
+    updateUi();
   });
   previewSeek.addEventListener("input", () => {
     const value = Number(previewSeek.value);

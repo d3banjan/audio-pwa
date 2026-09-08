@@ -309,6 +309,324 @@ test("extracts a real generated MP4/AAC fixture to an exact canonical manifest",
   expect(pageErrors).not.toContain("Unable to load a worklet's module.");
 });
 
+test("processes a committed MP4 cache in the worker and returns a real PCM24 WAV", async ({
+  page,
+}) => {
+  await resetAndOpen(page);
+  await page.locator("#media-file").setInputFiles(generatedMp4);
+  const cacheStatus = page.locator("#audio-cache-status");
+  await expect(cacheStatus).toHaveText(
+    /Audio cache is ready\. Keep this tab active, then click Start preparation\.|Preparing locally at playback speed/,
+    { timeout: 15_000 },
+  );
+  const start = page.locator("#start-audio-cache");
+  if (await start.isVisible()) await start.click();
+  await expect(cacheStatus).toContainText("Local audio cache is ready.", {
+    timeout: 15_000,
+  });
+  await expect(page.locator("#output-help")).toContainText("local chunks");
+
+  await page.locator("#create-output").click();
+  await expect(page.locator("#preview-play")).toHaveText(/Play|Resume/);
+  await expect(page.locator("#output-status")).toContainText(
+    /Analyzing|Applying|Creating/,
+    { timeout: 15_000 },
+  );
+  await expect(page.locator("#output-status")).toContainText(
+    "Ready locally as audio/wav",
+    { timeout: 30_000 },
+  );
+  await expect(page.locator("#output-download")).toHaveAttribute(
+    "download",
+    /-processed\.wav$/,
+  );
+  await expect
+    .poll(() =>
+      page
+        .locator("#output-preview")
+        .evaluate((node: HTMLAudioElement) => node.readyState),
+    )
+    .toBeGreaterThanOrEqual(1);
+  const artifact = await page
+    .locator("#output-preview")
+    .evaluate(async (node: HTMLAudioElement) => {
+      let response: Response;
+      try {
+        response = await fetch(node.src);
+      } catch (error) {
+        return {
+          fetchError: error instanceof Error ? error.message : String(error),
+          src: node.src,
+          readyState: node.readyState,
+          mediaError: node.error?.message,
+        };
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return {
+        type: response.headers.get("content-type"),
+        riff: new TextDecoder().decode(bytes.slice(0, 4)),
+        wave: new TextDecoder().decode(bytes.slice(8, 12)),
+        format: bytes[20]! | (bytes[21]! << 8),
+        channels: bytes[22]! | (bytes[23]! << 8),
+        bits: bytes[34]! | (bytes[35]! << 8),
+        bytes: bytes.length,
+      };
+    });
+  expect(artifact).not.toHaveProperty("fetchError");
+  expect(artifact).toMatchObject({
+    type: "audio/wav",
+    riff: "RIFF",
+    wave: "WAVE",
+    format: 1,
+    channels: 2,
+    bits: 24,
+  });
+  expect(artifact.bytes).toBeGreaterThan(44);
+
+  const pointers = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("cinematic-audio-i009", 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const values = await new Promise<unknown[]>((resolve, reject) => {
+      const transaction = db.transaction("manifests", "readonly");
+      const store = transaction.objectStore("manifests");
+      const requests = [
+        store.get("segmentation:current"),
+        store.get("processing:current"),
+      ];
+      transaction.oncomplete = () => {
+        db.close();
+        resolve(requests.map((request) => request.result));
+      };
+      transaction.onerror = () => reject(transaction.error);
+    });
+    return values;
+  });
+  expect(pointers[0]).toMatchObject({ resultId: expect.any(String) });
+  expect(pointers[1]).toMatchObject({ runId: expect.any(String) });
+});
+
+test("stops prepared processing before the worker when local storage is insufficient", async ({
+  page,
+}) => {
+  await resetAndOpen(page);
+  await page.locator("#media-file").setInputFiles(generatedMp4);
+  const cacheStatus = page.locator("#audio-cache-status");
+  await expect(cacheStatus).toHaveText(
+    /Audio cache is ready\. Keep this tab active, then click Start preparation\.|Preparing locally at playback speed/,
+    { timeout: 15_000 },
+  );
+  const start = page.locator("#start-audio-cache");
+  if (await start.isVisible()) await start.click();
+  await expect(cacheStatus).toContainText("Local audio cache is ready.", {
+    timeout: 15_000,
+  });
+
+  await page.evaluate(() => {
+    Object.defineProperty(StorageManager.prototype, "estimate", {
+      configurable: true,
+      value: async () => ({ quota: 1, usage: 0 }),
+    });
+  });
+  await page.locator("#create-output").click();
+
+  await expect(page.locator("#output-status")).toHaveText(
+    "There is not enough free local storage for this processed file. Free some space and try again.",
+  );
+  await expect(page.locator("#output-progress")).toHaveAttribute("hidden", "");
+  await expect(page.locator("#output-download")).toBeHidden();
+});
+
+test("a delayed storage check accepts only one rapid processed-file launch", async ({
+  page,
+}) => {
+  await resetAndOpen(page);
+  await page.locator("#media-file").setInputFiles(generatedMp4);
+  const cacheStatus = page.locator("#audio-cache-status");
+  await expect(cacheStatus).toHaveText(
+    /Audio cache is ready\. Keep this tab active, then click Start preparation\.|Preparing locally at playback speed/,
+    { timeout: 15_000 },
+  );
+  const start = page.locator("#start-audio-cache");
+  if (await start.isVisible()) await start.click();
+  await expect(cacheStatus).toContainText("Local audio cache is ready.", {
+    timeout: 15_000,
+  });
+  await page.evaluate(() => {
+    let release = () => undefined;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gate = { calls: 0, release };
+    (
+      window as unknown as {
+        processingStorageGate: typeof gate;
+      }
+    ).processingStorageGate = gate;
+    Object.defineProperty(StorageManager.prototype, "estimate", {
+      configurable: true,
+      value: async () => {
+        gate.calls += 1;
+        await wait;
+        return { quota: 10_000_000_000, usage: 0 };
+      },
+    });
+  });
+
+  await page.locator("#create-output").click();
+  await expect(page.locator("#create-output")).toBeDisabled();
+  await page.evaluate(() =>
+    document.querySelector<HTMLButtonElement>("#create-output")?.click(),
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as unknown as {
+              processingStorageGate: { calls: number };
+            }
+          ).processingStorageGate.calls,
+      ),
+    )
+    .toBe(1);
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        processingStorageGate: { release: () => void };
+      }
+    ).processingStorageGate.release(),
+  );
+  await expect(page.locator("#output-status")).toContainText(
+    "Ready locally as audio/wav",
+    { timeout: 30_000 },
+  );
+});
+
+test("source replacement invalidates a launch waiting for storage", async ({
+  page,
+}) => {
+  await resetAndOpen(page);
+  await page.locator("#media-file").setInputFiles(generatedMp4);
+  const cacheStatus = page.locator("#audio-cache-status");
+  await expect(cacheStatus).toHaveText(
+    /Audio cache is ready\. Keep this tab active, then click Start preparation\.|Preparing locally at playback speed/,
+    { timeout: 15_000 },
+  );
+  const start = page.locator("#start-audio-cache");
+  if (await start.isVisible()) await start.click();
+  await expect(cacheStatus).toContainText("Local audio cache is ready.", {
+    timeout: 15_000,
+  });
+  await page.evaluate(() => {
+    let release = () => undefined;
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gate = { release };
+    (
+      window as unknown as {
+        processingStorageGate: typeof gate;
+      }
+    ).processingStorageGate = gate;
+    Object.defineProperty(StorageManager.prototype, "estimate", {
+      configurable: true,
+      value: async () => {
+        await wait;
+        return { quota: 10_000_000_000, usage: 0 };
+      },
+    });
+  });
+
+  await page.locator("#create-output").click();
+  await expect(page.locator("#create-output")).toBeDisabled();
+  await page.locator("#media-file").setInputFiles({
+    name: "replacement-during-check.wav",
+    mimeType: "audio/wav",
+    buffer: tinyWav(),
+  });
+  await expect(page.locator("#selection-status")).toContainText(
+    "Imported source metadata",
+  );
+  await page.evaluate(() =>
+    (
+      window as unknown as {
+        processingStorageGate: { release: () => void };
+      }
+    ).processingStorageGate.release(),
+  );
+
+  await expect(page.locator("#output-help")).toContainText(
+    "runs at playback speed",
+  );
+  await expect(page.locator("#output-download")).toBeHidden();
+  await expect(page.locator("#output-status")).not.toContainText(
+    "Ready locally as audio/wav",
+  );
+});
+
+test("a replacement audio source cannot process the previous MP4 cache", async ({
+  page,
+}) => {
+  await resetAndOpen(page);
+  await page.locator("#media-file").setInputFiles(generatedMp4);
+  const cacheStatus = page.locator("#audio-cache-status");
+  await expect(cacheStatus).toHaveText(
+    /Audio cache is ready\. Keep this tab active, then click Start preparation\.|Preparing locally at playback speed/,
+    { timeout: 15_000 },
+  );
+  const start = page.locator("#start-audio-cache");
+  if (await start.isVisible()) await start.click();
+  await expect(cacheStatus).toContainText("Local audio cache is ready.", {
+    timeout: 15_000,
+  });
+
+  await page.locator("#media-file").setInputFiles({
+    name: "replacement.wav",
+    mimeType: "audio/wav",
+    buffer: tinyWav(),
+  });
+  await expect(page.locator("#output-help")).toContainText(
+    "runs at playback speed",
+  );
+  await page.locator("#create-output").click();
+  await expect(page.locator("#output-status")).toContainText("Ready locally", {
+    timeout: 10_000,
+  });
+  await expect(page.locator("#output-download")).toHaveAttribute(
+    "download",
+    /replacement-processed\.(webm|ogg|m4a)$/,
+  );
+});
+
+test("cancels prepared worker processing without publishing a WAV", async ({
+  page,
+}) => {
+  await resetAndOpen(page);
+  await page.locator("#media-file").setInputFiles(generatedMp4);
+  const cacheStatus = page.locator("#audio-cache-status");
+  await expect(cacheStatus).toHaveText(
+    /Audio cache is ready\. Keep this tab active, then click Start preparation\.|Preparing locally at playback speed/,
+    { timeout: 15_000 },
+  );
+  const start = page.locator("#start-audio-cache");
+  if (await start.isVisible()) await start.click();
+  await expect(cacheStatus).toContainText("Local audio cache is ready.", {
+    timeout: 15_000,
+  });
+
+  await page.locator("#create-output").click();
+  await page.locator("#cancel-output").click();
+  await expect(page.locator("#output-status")).toContainText(
+    "Processing cancelled.",
+    { timeout: 15_000 },
+  );
+  await expect(page.locator("#output-download")).toBeHidden();
+  await expect(page.locator("#preview-play")).toBeEnabled();
+});
+
 test("cancels native preparation without disturbing the visible preview", async ({
   page,
 }) => {
