@@ -69,6 +69,10 @@ accepts finite ratios in `[0, 1]` and nonnegative integer counts where completed
 work does not exceed total work. A Silero session created as cancellation lands
 is disposed before cancellation propagates.
 
+GitHub Pages can serve the model with transfer compression, so its HTTP
+`Content-Length` is not treated as the artifact length. The loader verifies the
+decoded model bytes and checksum before creating the Silero session.
+
 The UI freezes the current preview controls into I-011 batch options before it
 starts the prepared path, pauses the preview, and reports analyzing, applying
 settings, and WAV creation as separate stages. It uses sample-peak safety

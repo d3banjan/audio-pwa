@@ -55,18 +55,9 @@ export async function loadVerifiedSileroArtifact(options: {
       `The locally installed Silero model returned HTTP ${response.status}.`,
     );
   }
-  const contentLength = response.headers.get("content-length");
-  const declaredBytes = contentLength === null ? null : Number(contentLength);
-  if (
-    declaredBytes !== null &&
-    Number.isFinite(declaredBytes) &&
-    declaredBytes !== MANIFEST.artifactBytes
-  ) {
-    throw new ModelAssetError(
-      "size-mismatch",
-      "The installed Silero model has the wrong byte length.",
-    );
-  }
+  // LEAKY ABSTRACTION: Content-Length describes the HTTP transfer representation
+  // and can be the compressed size on static hosts. Integrity is based only on
+  // the decoded response bytes and their SHA-256 digest.
   const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength !== MANIFEST.artifactBytes) {
     throw new ModelAssetError(

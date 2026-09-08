@@ -138,6 +138,22 @@ describe("local model admission", () => {
     expect(loaded.byteLength).toBe(1_289_603);
   });
 
+  test("ignores compressed transfer Content-Length and verifies decoded bytes", async () => {
+    const bytes = await readFile(
+      new URL(
+        "../../public/models/silero-vad-v6.2.1/silero_vad_16k_op15.onnx",
+        import.meta.url,
+      ),
+    );
+    const loaded = await loadVerifiedSileroArtifact({
+      baseUrl: "https://local.invalid/audio-pwa/",
+      fetch: async () =>
+        new Response(bytes, { headers: { "content-length": "398271" } }),
+      crypto: webcrypto as unknown as Crypto,
+    });
+    expect(loaded.byteLength).toBe(1_289_603);
+  });
+
   test("rejects the wrong byte length before session creation", async () => {
     await expect(
       loadVerifiedSileroArtifact({
